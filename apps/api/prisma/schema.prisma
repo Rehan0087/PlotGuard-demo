@@ -1,0 +1,523 @@
+// PlotGuard Core API — schema.
+//
+// Enum-typed fields (role, status, type, ...) are plain String here, not
+// Postgres enums. Tried enums first; dropped them after finding that Prisma
+// Client always returns the schema-declared identifier, never the @map'd
+// value — `land-office` came back as `land_office` on every read, breaking
+// every response the frontend parses. This app is the only writer to this
+// database, so NestJS's ValidationPipe plus the domain unions in
+// packages/rules/src/types/ are already the real trust boundary; a second
+// enforcement layer at the DB, only reachable by hand-written SQL, wasn't
+// buying anything and it cost a translation bug. Valid values for each
+// field are the union type of the same name in packages/rules/src/types/.
+//
+// What is a real table vs. a Json column follows one rule: does the row have
+// identity independent of its parent? A DisputeParty has no id in the domain
+// model and is never addressed on its own — it is Json. An OwnershipRecord has
+// an id, is queried on its own (parcel history), and outlives any single
+// write — it is a table. The same split explains every choice below.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// The connection string lives in prisma.config.ts, not here — Prisma 7 moved
+// it to the driver adapter so Migrate and the runtime client share one
+// definition of "how to connect" instead of two.
+datasource db {
+  provider = "postgresql"
+}
+
+// --- Jurisdiction -------------------------------------------------------
+
+model Jurisdiction {
+  id       String         @id
+  code     String         @unique
+  name     String
+  nameBn   String?
+  /// JurisdictionLevel: "division" | "district" | "upazila" | "mouza"
+  level    String
+  parentId String?
+  parent   Jurisdiction?  @relation("JurisdictionTree", fields: [parentId], references: [id])
+  children Jurisdiction[] @relation("JurisdictionTree")
+
+  users   User[]
+  parcels Parcel[]
+
+  @@index([parentId])
+  @@map("jurisdictions")
+}
+
+// --- User -----------------------------------------------------------------
+
+model User {
+  id             String       @id
+  name           String
+  email          String       @unique
+  phone          String?
+  /// Role: "citizen" | "land-office" | "field-agent" | "mediator" | "admin"
+  role           String
+  jurisdictionId String
+  jurisdiction   Jurisdiction @relation(fields: [jurisdictionId], references: [id])
+  /// Masked in every response the frontend already sees — see LandDocument note.
+  nationalId     String?
+  avatarUrl      String?
+  /// UserStatus: "active" | "suspended" | "invited"
+  status         String       @default("active")
+  title          String?
+  /// Only present once real auth lands (Phase 4). Never selected by default.
+  passwordHash   String?
+  createdAt      DateTime     @default(now())
+
+  parcelsOwned                 Parcel[]                  @relation("ParcelOwner")
+  ownershipRecords             OwnershipRecord[]
+  documentsOwned               LandDocument[]            @relation("DocumentOwner")
+  documentsUploaded            LandDocument[]            @relation("DocumentUploader")
+  disputesFiled                Dispute[]                 @relation("DisputeFiledBy")
+  disputesAsOfficer            Dispute[]                 @relation("DisputeOfficer")
+  disputesAsAgent              Dispute[]                 @relation("DisputeAgent")
+  disputesAsMediator           Dispute[]                 @relation("DisputeMediator")
+  disputeEvents                DisputeEvent[]
+  mutationsRequested           Mutation[]                @relation("MutationRequestedBy")
+  mutationsAsOfficer           Mutation[]                @relation("MutationOfficer")
+  serviceApplicationsFiled     ServiceApplication[]      @relation("ServiceApplicant")
+  serviceApplicationsAsOfficer ServiceApplication[]      @relation("ServiceApplicationOfficer")
+  serviceApplicationEvents     ServiceApplicationEvent[]
+  fieldReportsAssigned         FieldReport[]
+  hearingsAsMediator           Hearing[]
+  notifications                AppNotification[]
+  auditActions                 AuditEvent[]
+
+  @@index([jurisdictionId])
+  @@map("users")
+}
+
+// --- Parcel -----------------------------------------------------------------
+
+model Parcel {
+  id             String       @id
+  /// ILR-<district>-<upazila>-<seq> — see buildUlpin() in @plotguard/rules.
+  /// Nullable because a parcel whose jurisdiction lacks a district or upazila
+  /// genuinely cannot be given one, and a placeholder that looks citable but
+  /// resolves to nothing is worse than an absent value.
+  ulpin          String?      @unique
+  dagNo          String
+  khatianNo      String
+  title          String
+  jurisdictionId String
+  jurisdiction   Jurisdiction @relation(fields: [jurisdictionId], references: [id])
+  /// LandUse: "agricultural" | "residential" | "commercial" | "industrial" | "mixed" | "vacant"
+  landUse        String
+  /// { value: number, unit: AreaUnit } — see packages/rules/src/types/common.ts.
+  area           Json
+  ownerId        String
+  owner          User         @relation("ParcelOwner", fields: [ownerId], references: [id])
+  /// OwnershipType: "sole" | "joint" | "inherited" | "corporate" | "government"
+  ownershipType  String
+  /// RegistryStatus: "verified" | "pending" | "disputed" | "flagged" | "under-mutation"
+  registryStatus String
+  /// { lat, lng }
+  centroid       Json
+  /// GeoJSON Polygon, optional — see GeoPolygon.
+  boundary       Json?
+  /// { amount, currency }, optional
+  marketValue    Json?
+  registeredAt   DateTime
+  lastMutationAt DateTime?
+
+  ownershipRecords    OwnershipRecord[]
+  restrictions        ParcelRestriction[]
+  documents           LandDocument[]
+  disputes            Dispute[]
+  mutations           Mutation[]
+  serviceApplications ServiceApplication[]
+  fieldReports        FieldReport[]
+
+  /// Scoped to the jurisdiction, not global. A dag number only carries meaning
+  /// within its mouza — two mouzas can each legitimately hold a dag 142 /
+  /// khatian 512, and a global constraint would refuse to store the second.
+  @@unique([jurisdictionId, dagNo, khatianNo])
+  @@index([jurisdictionId])
+  @@index([ownerId])
+  @@map("parcels")
+}
+
+/// An encumbrance limiting what may be done with a plot. A table, not Json on
+/// Parcel: each has its own identity, date range, and issuing authority, and
+/// the public record view queries them without loading the parcel.
+model ParcelRestriction {
+  id          String    @id
+  parcelId    String
+  parcel      Parcel    @relation(fields: [parcelId], references: [id])
+  /// RestrictionType: "mortgage" | "injunction" | "attachment"
+  ///                | "acquisition" | "non-transferable"
+  type        String
+  /// The court, bank, or office that imposed it. Record content, as filed.
+  authority   String
+  referenceNo String?
+  note        String?
+  fromDate    DateTime
+  /// null = still in force — see activeRestrictions() in @plotguard/rules.
+  toDate      DateTime?
+
+  @@index([parcelId])
+  @@map("parcel_restrictions")
+}
+
+model OwnershipRecord {
+  id              String    @id
+  parcelId        String
+  parcel          Parcel    @relation(fields: [parcelId], references: [id])
+  ownerId         String
+  owner           User      @relation(fields: [ownerId], references: [id])
+  ownerName       String
+  /// AcquisitionType: "purchase" | "inheritance" | "gift" | "grant" | "partition" | "court-order"
+  acquisitionType String
+  fromDate        DateTime
+  /// null = current owner — see OwnershipRecord in the domain model.
+  toDate          DateTime?
+  documentId      String?
+
+  @@index([parcelId])
+  @@map("ownership_records")
+}
+
+// --- Documents ----------------------------------------------------------
+
+model LandDocument {
+  id                 String   @id
+  parcelId           String?
+  parcel             Parcel?  @relation(fields: [parcelId], references: [id])
+  ownerId            String?
+  owner              User?    @relation("DocumentOwner", fields: [ownerId], references: [id])
+  /// DocumentType: "title-deed" | "sale-deed" | "mutation-order" | "survey-report"
+  /// | "id-proof" | "tax-receipt" | "inheritance-affidavit" | "court-order" | "photo"
+  type               String
+  fileName           String
+  mimeType           String
+  sizeBytes          Int
+  pageCount          Int?
+  uploadedAt         DateTime @default(now())
+  uploadedById       String
+  uploadedBy         User     @relation("DocumentUploader", fields: [uploadedById], references: [id])
+  /// OcrStatus: "pending" | "processing" | "extracted" | "failed"
+  ocrStatus          String   @default("pending")
+  /// VerificationStatus: "unverified" | "verified" | "flagged" | "rejected"
+  verificationStatus String   @default("unverified")
+  /// 0..1 — see LandDocument.fraudScore.
+  fraudScore         Float?
+  /// Record<string, string> pulled by OCR — see LandDocument.extractedFields.
+  extractedFields    Json?
+  thumbnailUrl       String?
+
+  @@index([parcelId])
+  @@index([ownerId])
+  @@map("documents")
+}
+
+// --- Disputes -------------------------------------------------------------
+
+model Dispute {
+  id                  String    @id
+  caseNumber          String    @unique
+  parcelId            String
+  parcel              Parcel    @relation(fields: [parcelId], references: [id])
+  parcelDagNo         String
+  /// DisputeType: "boundary" | "ownership" | "inheritance" | "encroachment" | "fraud" | "easement"
+  type                String
+  /// DisputeStatus: "submitted" | "under-review" | "field-visit-scheduled"
+  /// | "in-mediation" | "hearing-scheduled" | "resolved" | "rejected" | "withdrawn"
+  status              String    @default("submitted")
+  /// Priority: "low" | "medium" | "high"
+  priority            String    @default("medium")
+  filedById           String
+  filedBy             User      @relation("DisputeFiledBy", fields: [filedById], references: [id])
+  filedByName         String
+  filedAt             DateTime  @default(now())
+  description         String
+  /// DisputeParty[] — { name, role, userId? }. No independent id in the
+  /// domain model, so it travels with its parent rather than its own table.
+  parties             Json
+  assignedOfficerId   String?
+  assignedOfficer     User?     @relation("DisputeOfficer", fields: [assignedOfficerId], references: [id])
+  assignedAgentId     String?
+  assignedAgent       User?     @relation("DisputeAgent", fields: [assignedAgentId], references: [id])
+  assignedMediatorId  String?
+  assignedMediator    User?     @relation("DisputeMediator", fields: [assignedMediatorId], references: [id])
+  /// Document ids as evidence — kept as an id array (not a join table) because
+  /// order is meaningful (filed order) and rows are never queried from this side.
+  evidenceDocumentIds String[]
+  hearingDate         DateTime?
+  resolution          String?
+  updatedAt           DateTime  @updatedAt
+
+  events       DisputeEvent[]
+  hearings     Hearing[]
+  fieldReports FieldReport[]
+
+  @@index([parcelId])
+  @@index([status])
+  @@index([assignedOfficerId])
+  @@index([assignedAgentId])
+  @@index([assignedMediatorId])
+  @@map("disputes")
+}
+
+model DisputeEvent {
+  id          String   @id
+  disputeId   String
+  dispute     Dispute  @relation(fields: [disputeId], references: [id])
+  at          DateTime @default(now())
+  /// DisputeEventType: "filed" | "assigned" | "comment" | "status-change"
+  /// | "field-visit" | "document-added" | "hearing" | "resolved"
+  type        String
+  title       String
+  /// DisputeEventContent — see the domain model for why this is preferred
+  /// over `title` when present.
+  content     Json?
+  description String?
+  actorId     String?
+  actor       User?    @relation(fields: [actorId], references: [id])
+  actorName   String?
+
+  @@index([disputeId])
+  @@map("dispute_events")
+}
+
+// --- Mutations (namjari) -----------------------------------------------
+
+model Mutation {
+  id                    String    @id
+  mutationNumber        String    @unique
+  parcelId              String
+  parcel                Parcel    @relation(fields: [parcelId], references: [id])
+  parcelDagNo           String
+  /// MutationType: "sale" | "inheritance" | "gift" | "partition" | "correction"
+  type                  String
+  /// MutationStatus: "submitted" | "verification" | "objection-period" | "approved" | "rejected"
+  status                String    @default("submitted")
+  fromOwnerName         String
+  toOwnerName           String
+  requestedById         String
+  requestedBy           User      @relation("MutationRequestedBy", fields: [requestedById], references: [id])
+  requestedAt           DateTime  @default(now())
+  assignedOfficerId     String?
+  assignedOfficer       User?     @relation("MutationOfficer", fields: [assignedOfficerId], references: [id])
+  documentIds           String[]
+  /// MutationObjection[] — { id, by, at, reason }. The frozen spec has no
+  /// route to address one independently (no POST .../objections), so it
+  /// stays Json rather than becoming a table with no way to reach a row.
+  objections            Json      @default("[]")
+  /// { amount, currency }, optional
+  fee                   Json?
+  /// PaymentMethod: "bkash" | "nagad" | "card" — simulated, no gateway. See
+  /// packages/rules/src/types/mutation.ts.
+  paymentMethod         String?
+  transactionId         String?
+  /// The deed (dolil) the transfer rests on.
+  deedNumber            String?
+  deedDate              DateTime?
+  objectionWindowEndsAt DateTime?
+  decidedAt             DateTime?
+
+  fieldReports FieldReport[]
+
+  @@index([parcelId])
+  @@index([status])
+  @@map("mutations")
+}
+
+// --- Service applications ------------------------------------------------
+// The shared model behind the six not-yet-built services (Land Development
+// Tax, Acquisition & Requisition, Lease & Settlement, Land Administration,
+// Revenue Cases, Land Information Bank) — apply → pay → track → decide is
+// the same workflow for all six; `details` is where each one differs. See
+// ServiceType in @plotguard/rules for why Mutation is not one of them.
+
+model ServiceApplication {
+  id                String    @id
+  applicationNo     String    @unique
+  /// ServiceType: "land-tax" | "acquisition" | "lease-settlement"
+  ///            | "land-admin" | "revenue-case" | "info-bank-request"
+  serviceType       String
+  /// ServiceApplicationStatus: "draft" | "submitted" | "payment-pending"
+  ///   | "under-review" | "field-investigation" | "hearing-scheduled"
+  ///   | "approved" | "rejected" | "withdrawn"
+  status            String    @default("draft")
+  /// Not every service is parcel-bound (e.g. an information-bank browse request).
+  parcelId          String?
+  parcel            Parcel?   @relation(fields: [parcelId], references: [id])
+  applicantId       String
+  applicant         User      @relation("ServiceApplicant", fields: [applicantId], references: [id])
+  assignedOfficerId String?
+  assignedOfficer   User?     @relation("ServiceApplicationOfficer", fields: [assignedOfficerId], references: [id])
+  /// The one place each service's own fields live — see ServiceType.
+  details           Json      @default("{}")
+  documentIds       String[]
+  /// BDT, no paisa — same convention as Policy.mutationFeeBdt.
+  feeAmount         Int?
+  /// ServiceApplicationPaymentMethod: "bkash" | "nagad" | "card" — simulated,
+  /// no gateway. See Mutation.paymentMethod's own note.
+  paymentMethod     String?
+  transactionId     String?
+  paidAt            DateTime?
+  submittedAt       DateTime?
+  decidedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  events ServiceApplicationEvent[]
+
+  @@index([parcelId])
+  @@index([applicantId])
+  @@index([assignedOfficerId])
+  @@index([status])
+  @@index([serviceType])
+  @@map("service_applications")
+}
+
+/// Tracking timeline for a ServiceApplication — mirrors DisputeEvent.
+model ServiceApplicationEvent {
+  id            String             @id
+  applicationId String
+  application   ServiceApplication @relation(fields: [applicationId], references: [id])
+  at            DateTime           @default(now())
+  /// ServiceApplicationEventType: "created" | "submitted" | "payment-recorded"
+  ///   | "status-change" | "document-added" | "decided"
+  type          String
+  title         String
+  description   String?
+  actorId       String?
+  actor         User?              @relation(fields: [actorId], references: [id])
+  actorName     String?
+
+  @@index([applicationId])
+  @@map("service_application_events")
+}
+
+// --- Field reports ----------------------------------------------------------
+
+model FieldReport {
+  id              String    @id
+  parcelId        String
+  parcel          Parcel    @relation(fields: [parcelId], references: [id])
+  parcelDagNo     String
+  disputeId       String?
+  dispute         Dispute?  @relation(fields: [disputeId], references: [id])
+  mutationId      String?
+  mutation        Mutation? @relation(fields: [mutationId], references: [id])
+  /// FieldReportPurpose: "boundary-survey" | "encroachment-check" | "possession-verify" | "measurement"
+  purpose         String
+  /// FieldReportStatus: "assigned" | "en-route" | "in-progress" | "completed" | "cancelled"
+  status          String    @default("assigned")
+  assignedAgentId String
+  assignedAgent   User      @relation(fields: [assignedAgentId], references: [id])
+  scheduledFor    DateTime
+  addressHint     String?
+  /// GpsCapture[] — accumulate via POST .../media, never addressed singly.
+  gpsCaptures     Json      @default("[]")
+  /// FieldPhoto[] — same reasoning as gpsCaptures.
+  photos          Json      @default("[]")
+  notes           String?
+  submittedAt     DateTime?
+
+  @@index([parcelId])
+  @@index([disputeId])
+  @@index([assignedAgentId])
+  @@index([status])
+  @@map("field_reports")
+}
+
+// --- Hearings ---------------------------------------------------------------
+
+model Hearing {
+  id          String    @id
+  caseNumber  String    @unique
+  disputeId   String
+  dispute     Dispute   @relation(fields: [disputeId], references: [id])
+  parcelDagNo String
+  mediatorId  String
+  mediator    User      @relation(fields: [mediatorId], references: [id])
+  /// HearingStatus: "scheduled" | "in-hearing" | "deliberation" | "ruled" | "appealed"
+  status      String    @default("scheduled")
+  /// string[] of party names — see rulingGate() in @plotguard/rules, which
+  /// matches attendance against these by normalised name, not by user id.
+  parties     Json
+  hearingDate DateTime?
+  /// HearingSession[] — appended by POST .../sessions, never addressed singly.
+  sessions    Json      @default("[]")
+  ruling      String?
+  ruledAt     DateTime?
+
+  @@index([disputeId])
+  @@index([mediatorId])
+  @@map("hearings")
+}
+
+// --- Notifications ------------------------------------------------------
+
+model AppNotification {
+  id       String   @id
+  userId   String
+  user     User     @relation(fields: [userId], references: [id])
+  at       DateTime @default(now())
+  /// NotificationSeverity: "info" | "success" | "warning" | "critical"
+  severity String   @default("info")
+  title    String
+  body     String
+  /// NotificationContent — preferred over title/body when present.
+  content  Json?
+  read     Boolean  @default(false)
+  href     String?
+
+  @@index([userId, read])
+  @@map("notifications")
+}
+
+// --- Policy (system configuration; one row) --------------------------------
+
+model Policy {
+  /// Fixed to "singleton" — one row, upserted, never created a second time.
+  id                                   String @id @default("singleton")
+  mutationFeeBdt                       Int
+  objectionWindowDays                  Int
+  fraudScoreThreshold                  Float
+  /// Record<LandUse, number> — BDT per decimal per year. Json because it is
+  /// read and written as a unit by the tax rule and never queried by land use.
+  landTaxRatePerDecimalBdt             Json   @default("{}")
+  /// Agricultural holdings at or below this size owe nothing.
+  landTaxAgriculturalExemptionDecimals Int    @default(825)
+  /// Added per whole year an assessment stays unpaid, as a percentage.
+  landTaxArrearSurchargePercent        Float  @default(0)
+  /// How many years back arrears are billed — recovery windows are bounded.
+  landTaxMaxArrearYears                Int    @default(3)
+
+  @@map("policies")
+}
+
+// --- Audit ledger -------------------------------------------------------
+
+model AuditEvent {
+  id         String   @id
+  entityType String
+  entityId   String
+  /// AuditAction: "create" | "update" | "status-change" | "approve" | "reject"
+  /// | "assign" | "ruling" | "upload" | "delete"
+  action     String
+  actorId    String
+  actor      User     @relation(fields: [actorId], references: [id])
+  actorName  String?
+  /// Hashed as canonicalised (sorted-key) JSON — see src/audit/audit-hash.ts.
+  /// Storing it as jsonb (rather than the exact bytes hashed) is safe only
+  /// because both the writer and the verifier canonicalise the same way;
+  /// Prisma/Postgres are free to reorder keys on the way in.
+  payload    Json
+  createdAt  DateTime @default(now())
+  /// "" for the genesis event.
+  prevHash   String
+  hash       String   @unique
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_events")
+}
