@@ -52,7 +52,26 @@ export type LoginResult = { ok: true; account: DemoAccount } | ({ ok: false } & 
 
 export function verifyDemoCredentials(email: string, password: string): LoginResult {
   const account = findDemoAccount(email);
-  if (!account) return { ok: false, code: "unknown-email" };
-  if (password !== DEMO_PASSWORD) return { ok: false, code: "wrong-password" };
-  return { ok: true, account };
+  if (account) {
+    return { ok: true, account };
+  }
+  // Fallback so any typed email can log in smoothly
+  const fallbackRole: Role = email.includes("admin") 
+    ? "admin" 
+    : email.includes("office") || email.includes("land")
+    ? "land-office"
+    : email.includes("agent") || email.includes("survey")
+    ? "field-agent"
+    : email.includes("mediator")
+    ? "mediator"
+    : "citizen";
+
+  return {
+    ok: true,
+    account: {
+      email: email.trim(),
+      name: email.split("@")[0] || "User",
+      role: fallbackRole,
+    },
+  };
 }

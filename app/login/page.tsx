@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
 import { z } from "zod";
-import { Loader2, LogIn } from "lucide-react";
+import { Loader2, LogIn, User, Building2, MapPin, Scale, Shield } from "lucide-react";
 import { Logo } from "@/components/shell/logo";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
 import { LanguageToggle } from "@/components/shell/language-toggle";
@@ -19,9 +19,9 @@ import type { Dictionary } from "@/lib/i18n";
 import { useSessionStore } from "@/store/session";
 import { roleHome } from "@/lib/nav";
 import { DEMO_ACCOUNTS, DEMO_PASSWORD, verifyDemoCredentials } from "@/lib/demo-accounts";
-import type { LoginFailure } from "@/lib/demo-accounts";
+import type { LoginFailure, DemoAccount } from "@/lib/demo-accounts";
+import type { Role } from "@/lib/types";
 
-/** Built per locale — every message here is read by whoever is signing in. */
 function makeSchema(t: Dictionary) {
   return z.object({
     email: z.string().min(1, t.common.required).email(t.login.errorTitle),
@@ -31,18 +31,25 @@ function makeSchema(t: Dictionary) {
 
 type FormValues = z.infer<ReturnType<typeof makeSchema>>;
 
-export default function LoginPage() {
+const ROLE_ICONS: Record<Role, any> = {
+  citizen: User,
+  "land-office": Building2,
+  "field-agent": MapPin,
+  mediator: Scale,
+  admin: Shield,
+};
+
+function LoginFormContent() {
   const t = useT();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const roleParam = searchParams.get("role") as Role | null;
+
   const login = useSessionStore((s) => s.login);
   const role = useSessionStore((s) => s.role);
   const isAuthenticated = useSessionStore((s) => s.isAuthenticated);
   const hasHydrated = useSessionStore((s) => s.hasHydrated);
   const [failure, setFailure] = useState<LoginFailure | null>(null);
-
-  useEffect(() => {
-    if (hasHydrated && isAuthenticated) router.replace(roleHome(role));
-  }, [hasHydrated, isAuthenticated, role, router]);
 
   const {
     register,
@@ -53,6 +60,23 @@ export default function LoginPage() {
     resolver: standardSchemaResolver(makeSchema(t)),
     defaultValues: { email: "", password: "" },
   });
+
+  useEffect(() => {
+    if (hasHydrated && isAuthenticated) {
+      router.replace(roleHome(role));
+    }
+  }, [hasHydrated, isAuthenticated, role, router]);
+
+  // Pre-fill role from URL query param if present
+  useEffect(() => {
+    if (roleParam) {
+      const match = DEMO_ACCOUNTS.find((a) => a.role === roleParam);
+      if (match) {
+        setValue("email", match.email);
+        setValue("password", DEMO_PASSWORD);
+      }
+    }
+  }, [roleParam, setValue]);
 
   function onSubmit(values: FormValues) {
     const result = verifyDemoCredentials(values.email, values.password);
@@ -65,14 +89,16 @@ export default function LoginPage() {
     router.push(roleHome(result.account.role));
   }
 
-  function fillDemoAccount(email: string) {
+  function handleDirectRoleLogin(account: DemoAccount) {
     setFailure(null);
-    setValue("email", email);
+    setValue("email", account.email);
     setValue("password", DEMO_PASSWORD);
+    login(account.role);
+    router.push(roleHome(account.role));
   }
 
   return (
-    <div className="flex min-h-svh flex-col bg-muted/30">
+    <div className="flex min-h-svh flex-col bg-muted/30 font-sans">
       <div className="flex items-center justify-between px-4 py-4 sm:px-6">
         <Logo />
         <div className="flex items-center gap-1">
@@ -81,17 +107,17 @@ export default function LoginPage() {
         </div>
       </div>
 
-      <div className="flex flex-1 items-center justify-center px-4 pb-16">
-        <div className="w-full max-w-sm space-y-5">
-          <div className="space-y-1 text-center">
-            <h1 className="font-heading text-xl font-semibold text-foreground">
+      <div className="flex flex-1 items-center justify-center px-4 pb-16 pt-6">
+        <div className="w-full max-w-md space-y-6">
+          <div className="space-y-1.5 text-center">
+            <h1 className="font-heading text-2xl font-bold tracking-tight text-foreground">
               {t.common.appName}
             </h1>
             <p className="text-sm text-muted-foreground">{t.login.tagline}</p>
           </div>
 
-          <Card>
-            <CardContent className="pt-1">
+          <Card className="shadow-sm border-slate-200">
+            <CardContent className="pt-6">
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
                 {failure ? (
                   <Alert variant="destructive">
@@ -138,7 +164,7 @@ export default function LoginPage() {
                   ) : null}
                 </div>
 
-                <Button type="submit" className="w-full" disabled={isSubmitting}>
+                <Button type="submit" className="w-full bg-[#074726] hover:bg-[#05351c] text-white font-semibold h-10" disabled={isSubmitting}>
                   {isSubmitting ? (
                     <Loader2 className="size-4 animate-spin" />
                   ) : (
@@ -150,41 +176,59 @@ export default function LoginPage() {
             </CardContent>
           </Card>
 
-          <div className="space-y-2">
-            <div className="text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              {t.login.demoAccountsLabel}
+          {/* Quick 1-Click Role Login Section */}
+          <div className="space-y-3">
+            <div className="text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {t.login.demoAccountsLabel} (1-Click Direct Login)
             </div>
-            <div className="grid gap-1.5">
-              {DEMO_ACCOUNTS.map((account) => (
-                <button
-                  key={account.email}
-                  type="button"
-                  onClick={() => fillDemoAccount(account.email)}
-                  className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-left text-sm transition-colors hover:bg-muted/50"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium text-foreground">
-                      {account.name}
+            <div className="grid gap-2">
+              {DEMO_ACCOUNTS.map((account) => {
+                const IconComponent = ROLE_ICONS[account.role] || User;
+                return (
+                  <button
+                    key={account.email}
+                    type="button"
+                    onClick={() => handleDirectRoleLogin(account)}
+                    className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-3 text-left shadow-sm transition-all hover:border-[#074726] hover:shadow-md group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-[#074726] group-hover:bg-[#074726] group-hover:text-white transition-colors shrink-0">
+                        <IconComponent className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-sm text-slate-800 group-hover:text-[#074726] transition-colors">
+                          {account.name} {account.title ? `(${account.title})` : ""}
+                        </div>
+                        <div className="truncate text-xs text-slate-500">
+                          {account.email}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="ml-2 shrink-0 rounded-full bg-emerald-100 text-[#074726] px-2.5 py-1 text-xs font-semibold">
+                      {t.roles[account.role]}
                     </span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {account.email}
-                    </span>
-                  </span>
-                  <span className="ml-2 shrink-0 rounded bg-marker/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-marker">
-                    {t.roles[account.role]}
-                  </span>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
-            <p className="text-center text-xs text-muted-foreground">
+            <p className="text-center text-xs text-muted-foreground pt-1">
               {t.login.demoPasswordHint}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">
+              <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground font-semibold">
                 {DEMO_PASSWORD}
               </code>
             </p>
           </div>
+
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen">Loading...</div>}>
+      <LoginFormContent />
+    </Suspense>
   );
 }
