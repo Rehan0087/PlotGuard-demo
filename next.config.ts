@@ -5,6 +5,12 @@ const nextConfig: NextConfig = {
   // the app and the backend compile the same files and neither can drift onto
   // a stale dist. Next has to be told to run it through its own pipeline.
   transpilePackages: ["@plotguard/rules"],
+  images: {
+    unoptimized: true,
+    remotePatterns: [
+      { protocol: "https", hostname: "**" }
+    ]
+  },
 };
 
 export default nextConfig;
