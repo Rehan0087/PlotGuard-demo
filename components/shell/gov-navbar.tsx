@@ -206,14 +206,14 @@ export function GovNavbar() {
                 <ChevronDown className="h-3.5 w-3.5 text-slate-500" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
-                <DropdownMenuItem asChild>
-                  <Link href="/about">{locale === "bn" ? "আমাদের লক্ষ্য ও উদ্দেশ্য" : "Our Mission & Vision"}</Link>
+                <DropdownMenuItem render={<Link href="/about" />}>
+                  {locale === "bn" ? "আমাদের লক্ষ্য ও উদ্দেশ্য" : "Our Mission & Vision"}
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/about#structure">{locale === "bn" ? "সাংগঠনিক কাঠামো" : "Organizational Structure"}</Link>
+                <DropdownMenuItem render={<Link href="/about#structure" />}>
+                  {locale === "bn" ? "সাংগঠনিক কাঠামো" : "Organizational Structure"}
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/about#officers">{locale === "bn" ? "কর্মকর্তা তালিকা" : "Officer Directory"}</Link>
+                <DropdownMenuItem render={<Link href="/about#officers" />}>
+                  {locale === "bn" ? "কর্মকর্তা তালিকা" : "Officer Directory"}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -225,17 +225,17 @@ export function GovNavbar() {
                 <ChevronDown className="h-3.5 w-3.5 text-slate-500" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem asChild>
-                  <Link href="/support#bhumi-id">{landing?.navLearnBhumiId || "BhumiID Guide"}</Link>
+                <DropdownMenuItem render={<Link href="/support#bhumi-id" />}>
+                  {landing?.navLearnBhumiId || "BhumiID Guide"}
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/support#namjari">{landing?.navLearnNamjari || "Namjari Process"}</Link>
+                <DropdownMenuItem render={<Link href="/support#namjari" />}>
+                  {landing?.navLearnNamjari || "Namjari Process"}
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/support#faraiz">{landing?.navLearnFaraiz || "Faraiz Guide"}</Link>
+                <DropdownMenuItem render={<Link href="/support#faraiz" />}>
+                  {landing?.navLearnFaraiz || "Faraiz Guide"}
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/support#survey">{landing?.navLearnSurvey || "Survey Cycle"}</Link>
+                <DropdownMenuItem render={<Link href="/support#survey" />}>
+                  {landing?.navLearnSurvey || "Survey Cycle"}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

@@ -116,28 +116,50 @@ export default function LandingPage() {
           </div>
         </div>
 
-        {/* Right: Support Callout */}
-        <div className="flex w-full flex-col justify-center bg-muted px-8 py-12 md:w-80 lg:w-96 lg:px-12 border-l border-border shrink-0">
-          <div className="space-y-6">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                {landing?.supportCall}
-              </p>
-              <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#0B6B3A]/10 text-[#0B6B3A]">
-                  <HelpCircle className="h-6 w-6" />
-                </div>
-                <div className="font-heading text-3xl font-bold tracking-tight text-[#0B6B3A]">
-                  {landing?.helpline}
-                </div>
-              </div>
-            </div>
+        {/* Right: Support Callout (Jatiyo Smriti Soudho Watermark Card) */}
+        <div className="relative flex w-full flex-col items-center justify-center bg-white px-8 py-12 md:w-80 lg:w-96 lg:px-12 border-l border-border shrink-0 overflow-hidden shadow-inner">
+          {/* National Martyrs' Memorial (Jatiyo Smriti Soudho) SVG Watermark */}
+          <div className="absolute inset-0 flex items-end justify-center pointer-events-none z-0 opacity-10 py-4">
+            <svg viewBox="0 0 100 100" className="w-full h-full text-[#074726]" fill="currentColor">
+              {/* Center spike */}
+              <polygon points="50,10 48,90 52,90" />
+              {/* Fins */}
+              <polygon points="50,22 43,90 49,90" />
+              <polygon points="50,22 57,90 51,90" />
+
+              <polygon points="50,35 37,90 44,90" />
+              <polygon points="50,35 63,90 56,90" />
+
+              <polygon points="50,48 30,90 38,90" />
+              <polygon points="50,48 70,90 62,90" />
+
+              <polygon points="50,62 20,90 31,90" />
+              <polygon points="50,62 80,90 69,90" />
+
+              <polygon points="50,76 10,90 23,90" />
+              <polygon points="50,76 90,90 77,90" />
+              
+              {/* Base */}
+              <rect x="5" y="90" width="90" height="3" rx="1" />
+            </svg>
+          </div>
+
+          <div className="relative z-10 text-center space-y-4">
+            <h3 className="font-heading text-xl font-bold text-slate-800 leading-tight">
+              {locale === "bn" ? "ভূমিসেবা সহায়তার জন্য" : "For Land Service Assistance"}
+            </h3>
             
-            <div className="space-y-4 pt-4 border-t border-border">
-              <Button className="w-full landing-accent-bg hover:bg-[#B58813] text-white font-medium" size="lg">
-                {landing?.liveChat}
-              </Button>
+            <p className="text-xs sm:text-sm font-semibold text-slate-500 uppercase tracking-wider">
+              {locale === "bn" ? "কল করুন" : "Call"}
+            </p>
+
+            <div className="font-heading text-5xl font-extrabold tracking-tight text-[#074726] border-t border-b border-emerald-100 py-3 px-6 rounded-lg bg-emerald-50/50">
+              {locale === "bn" ? "১৬১২২" : "16122"}
             </div>
+
+            <p className="text-[10px] text-muted-foreground mt-2">
+              {locale === "bn" ? "যেকোনো মোবাইল বা ল্যান্ডফোন থেকে" : "From any mobile or landline"}
+            </p>
           </div>
         </div>
       </section>

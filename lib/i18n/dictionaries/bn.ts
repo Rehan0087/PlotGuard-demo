@@ -1231,7 +1231,7 @@ export const bn: Dictionary = {
 
     landing: {
       wordmark: "ভূমিসেতু",
-      helpline: "১৬XXX",
+      helpline: "১৬১২২",
       navHome: "হোম",
       navAbout: "আমাদের সম্পর্কে",
       navLearn: "জানুন",

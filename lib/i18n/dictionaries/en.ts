@@ -1303,7 +1303,7 @@ export const en = {
 
     landing: {
       wordmark: "BhumiSetu",
-      helpline: "16XXX",
+      helpline: "16122",
       navHome: "Home",
       navAbout: "About Us",
       navLearn: "Learn",
